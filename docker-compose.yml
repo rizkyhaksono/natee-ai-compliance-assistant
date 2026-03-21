@@ -1,58 +1,26 @@
 version: "3.9"
 
 services:
-  postgres:
-    image: pgvector/pgvector:pg16
-    environment:
-      POSTGRES_DB: ${POSTGRES_DB:-compliance_assistant}
-      POSTGRES_USER: ${POSTGRES_USER:-compliance}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-compliance_secret}
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-compliance}"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-
-  ollama:
-    image: ollama/ollama:latest
-    profiles: ["ollama"]
-    ports:
-      - "11434:11434"
-    volumes:
-      - ollama_data:/root/.ollama
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
-
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
     ports:
-      - "8000:8000"
+      - "8050:8050"
     env_file:
       - .env
     volumes:
       - ./backend:/app
       - ./backend/uploads:/app/uploads
-    depends_on:
-      postgres:
-        condition: service_healthy
+    extra_hosts:
+    - "host.docker.internal:host-gateway"
 
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
     ports:
-      - "3000:3000"
+      - "3050:3050"
     env_file:
       - .env
     volumes:
@@ -61,7 +29,3 @@ services:
       - /app/.next
     depends_on:
       - backend
-
-volumes:
-  postgres_data:
-  ollama_data:

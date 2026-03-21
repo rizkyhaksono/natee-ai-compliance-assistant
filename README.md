@@ -14,9 +14,8 @@ AI-powered compliance assistant that analyzes regulations and internal SOPs usin
                                  │                └─────────────────┘
                         ┌────────┴─────────┐
                         │ LLM Provider:    │
-                        │ Ollama or        │
-                        │ AWS Bedrock Nova │
-                        │ sentence-transformers │
+                        │ Ollama           │
+                        │ Ollama Embeddings │
                         └──────────────────┘
 ```
 
@@ -25,8 +24,8 @@ AI-powered compliance assistant that analyzes regulations and internal SOPs usin
 - **Backend**: Python + FastAPI
 - **Frontend**: Next.js + TypeScript + Tailwind CSS
 - **Vector DB**: PostgreSQL + pgvector
-- **LLM**: Ollama (local) or AWS Bedrock Nova (managed)
-- **Embeddings**: sentence-transformers (all-MiniLM-L6-v2)
+- **LLM**: Ollama (local)
+- **Embeddings**: Ollama embeddings (`all-minilm`)
 - **Infrastructure**: Docker Compose
 
 ## Features
@@ -75,14 +74,15 @@ Configurable judgment modes:
 
 ### Prerequisites
 - Docker & Docker Compose
+- PostgreSQL + pgvector already deployed and reachable from backend container
 - (Optional) NVIDIA GPU for faster LLM inference
-- AWS credentials (only if using Bedrock Nova)
 
 ### 1. Clone and configure
 
 ```bash
 cp .env.example .env
 # Edit .env if needed
+# Important: set POSTGRES_HOST/POSTGRES_PORT to your deployed PostgreSQL
 ```
 
 ### 2. Start services
@@ -91,46 +91,29 @@ cp .env.example .env
 docker compose up -d
 ```
 
-### 3. Choose your LLM provider
-
-#### Option A: Ollama (local)
+### 3. Configure Ollama
 
 Set in `.env`:
 
 ```bash
 LLM_PROVIDER=ollama
+OLLAMA_BASE_URL=http://host.docker.internal:11434
+OLLAMA_MODEL=qwen3.5:4b
+EMBEDDING_MODEL=all-minilm
 ```
 
-Start Ollama profile and pull model:
+Pull chat + embedding models from host Ollama:
 
 ```bash
-docker compose --profile ollama up -d
-docker compose exec ollama ollama pull llama3
+ollama pull qwen3.5:4b
+ollama pull all-minilm
 ```
-
-#### Option B: AWS Bedrock Nova
-
-Set in `.env`:
-
-```bash
-LLM_PROVIDER=bedrock_nova
-AWS_REGION=us-east-1
-AWS_BEDROCK_MODEL_ID=amazon.nova-lite-v1:0
-```
-
-Then run the stack normally:
-
-```bash
-docker compose up -d
-```
-
-Ensure AWS credentials are available to backend container (environment variables, shared credentials, or IAM role in your deployment platform).
 
 ### 4. Access the application
 
-- **Frontend**: http://localhost:3000
-- **Backend API**: http://localhost:8000
-- **API Docs**: http://localhost:8000/docs
+- **Frontend**: http://localhost:3050
+- **Backend API**: http://localhost:8050
+- **API Docs**: http://localhost:8050/docs
 
 ## API Endpoints
 
@@ -170,9 +153,9 @@ Ensure AWS credentials are available to backend container (environment variables
 │       ├── services/            # Business logic
 │       │   ├── document_parser.py  # PDF/DOCX parsing
 │       │   ├── chunking.py         # Text chunking
-│       │   ├── embedding.py        # sentence-transformers
+│       │   ├── embedding.py        # Ollama embeddings
 │       │   ├── vector_search.py    # pgvector similarity search
-│       │   ├── llm.py              # Ollama / Bedrock Nova integration
+│       │   ├── llm.py              # Ollama integration
 │       │   ├── rag.py              # RAG pipeline
 │       │   ├── gap_analysis.py     # Gap analysis
 │       │   ├── checklist.py        # Checklist generation
@@ -204,9 +187,9 @@ Ensure AWS credentials are available to backend container (environment variables
 
 | Concept | Implementation |
 |---------|---------------|
-| **LLM** | Provider abstraction for Ollama or AWS Bedrock Nova |
+| **LLM** | Provider abstraction for Ollama |
 | **Prompt Engineering** | System prompts, judgment modes, structured output |
-| **Embeddings** | sentence-transformers for semantic document representation |
+| **Embeddings** | Ollama embedding API for semantic document representation |
 | **RAG** | Retrieve → Augment → Generate pipeline with citations |
 | **Vector DB** | pgvector for similarity search with metadata filtering |
 | **Evaluation** | Retrieval relevance, faithfulness, groundedness metrics |
