@@ -1,5 +1,14 @@
+from pathlib import Path
 from pydantic_settings import BaseSettings
 from functools import lru_cache
+
+# Find .env: check current dir, then parent dirs up to 3 levels
+def _find_env_file() -> str:
+    for parent in [Path.cwd()] + list(Path.cwd().parents)[:3]:
+        candidate = parent / ".env"
+        if candidate.exists():
+            return str(candidate)
+    return ".env"
 
 
 class Settings(BaseSettings):
@@ -11,22 +20,18 @@ class Settings(BaseSettings):
     postgres_password: str = "compliance_secret"
 
     # LLM
-    llm_provider: str = "ollama"  # ollama or bedrock_nova
+    llm_provider: str = "ollama"  # ollama
 
     # Ollama
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "llama3"
 
-    # AWS Bedrock (Nova)
-    aws_region: str = "us-east-1"
-    aws_bedrock_model_id: str = "amazon.nova-lite-v1:0"
-
     # Embedding
-    embedding_model: str = "all-MiniLM-L6-v2"
+    embedding_model: str = "all-minilm"
 
     # Backend
     backend_host: str = "0.0.0.0"
-    backend_port: int = 8000
+    backend_port: int = 8050
     upload_dir: str = "./uploads"
     max_upload_size_mb: int = 50
 
@@ -51,12 +56,10 @@ class Settings(BaseSettings):
 
     @property
     def active_llm_model(self) -> str:
-        if self.llm_provider.lower() == "bedrock_nova":
-            return self.aws_bedrock_model_id
         return self.ollama_model
 
     class Config:
-        env_file = ".env"
+        env_file = _find_env_file()
         extra = "ignore"
 
 

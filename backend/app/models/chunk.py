@@ -17,7 +17,7 @@ class Chunk(Base):
     section = Column(String(500), nullable=True)
     page_number = Column(Integer, nullable=True)
     token_count = Column(Integer, nullable=True)
-    embedding = Column(Vector(384))  # all-MiniLM-L6-v2 produces 384-dim vectors
+    embedding = Column(Vector(384))  # all-minilm (Ollama) produces 384-dim vectors
     created_at = Column(DateTime, default=datetime.utcnow)
 
     document = relationship("Document", back_populates="chunks")

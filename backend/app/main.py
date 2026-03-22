@@ -23,11 +23,12 @@ app = FastAPI(
     description="AI-powered compliance assistant with RAG, Vector Search, Evaluation, and Guardrails",
     version="1.0.0",
     lifespan=lifespan,
+    redirect_slashes=False,
 )
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=["http://localhost:3050"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
