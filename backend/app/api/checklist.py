@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/checklist", tags=["checklist"])
 
 
-@router.post("/", response_model=ChecklistResponse)
+@router.post("", response_model=ChecklistResponse)
 async def generate_checklist(
     request: ChecklistRequest,
     db: AsyncSession = Depends(get_db),

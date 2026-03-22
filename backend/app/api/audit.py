@@ -3,25 +3,39 @@ import logging
 from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, func
 
 from app.database import get_db
+from app.models.audit_log import AuditLog
 from app.schemas.audit import AuditLogResponse, ReviewFeedbackRequest
+from app.schemas.pagination import PaginatedResponse
 from app.services.audit import AuditService
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/audit", tags=["audit"])
 
 
-@router.get("/", response_model=List[AuditLogResponse])
+@router.get("")
 async def get_audit_logs(
     action: Optional[str] = Query(None),
-    limit: int = Query(50, le=200),
-    offset: int = Query(0),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get audit logs with optional filtering."""
-    logs = await AuditService.get_logs(db, action=action, limit=limit, offset=offset)
-    return [AuditLogResponse.model_validate(log) for log in logs]
+    """Get audit logs with optional filtering and pagination."""
+    # Count total
+    count_query = select(func.count()).select_from(AuditLog)
+    if action:
+        count_query = count_query.where(AuditLog.action == action)
+    count_result = await db.execute(count_query)
+    total = count_result.scalar() or 0
+
+    # Fetch paginated
+    logs = await AuditService.get_logs(
+        db, action=action, limit=page_size, offset=(page - 1) * page_size
+    )
+    items = [AuditLogResponse.model_validate(log) for log in logs]
+    return PaginatedResponse.create(items=items, total=total, page=page, page_size=page_size)
 
 
 @router.get("/{audit_log_id}", response_model=AuditLogResponse)

@@ -1,7 +1,10 @@
 import logging
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, func, text
 from app.config import get_settings, Settings
+from app.database import get_db
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/admin", tags=["admin"])
@@ -55,3 +58,34 @@ async def update_config(config: GuardrailsConfig):
 async def get_runtime_config():
     """Get runtime overrides."""
     return _runtime_config
+
+
+@router.get("/debug/chunks")
+async def debug_chunks(db: AsyncSession = Depends(get_db)):
+    """Debug: check chunks table state."""
+    result = await db.execute(text("""
+        SELECT
+            d.id::text as doc_id,
+            d.name,
+            d.status::text as status,
+            COUNT(c.id) as total_chunks,
+            COUNT(c.embedding) as chunks_with_embedding,
+            COUNT(c.id) - COUNT(c.embedding) as chunks_null_embedding
+        FROM documents d
+        LEFT JOIN chunks c ON c.document_id = d.id
+        GROUP BY d.id, d.name, d.status
+    """))
+    rows = result.fetchall()
+    return {
+        "documents": [
+            {
+                "doc_id": r.doc_id,
+                "name": r.name,
+                "status": r.status,
+                "total_chunks": r.total_chunks,
+                "chunks_with_embedding": r.chunks_with_embedding,
+                "chunks_null_embedding": r.chunks_null_embedding,
+            }
+            for r in rows
+        ]
+    }

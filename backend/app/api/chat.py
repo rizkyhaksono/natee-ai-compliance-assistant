@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
 
-@router.post("/", response_model=ChatResponse)
+@router.post("", response_model=ChatResponse)
 async def chat(request: ChatRequest, db: AsyncSession = Depends(get_db)):
     """Q&A endpoint using RAG pipeline."""
     rag_service = RAGService()

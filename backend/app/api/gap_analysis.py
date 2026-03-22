@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/gap-analysis", tags=["gap-analysis"])
 
 
-@router.post("/", response_model=GapAnalysisResponse)
+@router.post("", response_model=GapAnalysisResponse)
 async def run_gap_analysis(
     request: GapAnalysisRequest,
     db: AsyncSession = Depends(get_db),
