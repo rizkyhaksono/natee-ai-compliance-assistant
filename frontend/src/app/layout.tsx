@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import Sidebar from "@/components/Sidebar";
+import { ThemeProvider } from "@/context/ThemeContext";
 
 export const metadata: Metadata = {
   title: "AI Compliance Assistant",
@@ -9,10 +10,16 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
-      <body className="flex h-screen">
-        <Sidebar />
-        <main className="flex-1 overflow-auto bg-gray-50">{children}</main>
+    <html lang="en" suppressHydrationWarning>
+      <body className="app-shell bg-white text-zinc-900 dark:bg-black dark:text-zinc-100">
+        <ThemeProvider>
+          <div className="flex h-screen">
+            <Sidebar />
+            <main className="flex-1 overflow-hidden h-screen bg-zinc-50 dark:bg-zinc-950">
+              {children}
+            </main>
+          </div>
+        </ThemeProvider>
       </body>
     </html>
   );
