@@ -24,6 +24,36 @@ class RAGService:
         self.guardrails = GuardrailsService()
         self.settings = get_settings()
 
+    async def _retrieve_chunks_with_fallback(
+        self,
+        db: AsyncSession,
+        query_embedding: List[float],
+        document_ids: Optional[List[uuid.UUID]],
+    ) -> tuple[List[dict], bool]:
+        """Try strict-to-relaxed thresholds to reduce empty retrievals."""
+        configured = float(self.settings.confidence_threshold)
+        thresholds = [configured, 0.3, 0.1, -1.0]
+        seen = set()
+
+        for threshold in thresholds:
+            # Preserve order while removing duplicates.
+            if threshold in seen:
+                continue
+            seen.add(threshold)
+
+            chunks = await VectorSearchService.search(
+                db,
+                query_embedding,
+                top_k=self.settings.max_context_chunks,
+                document_ids=document_ids,
+                threshold=threshold,
+            )
+            if chunks:
+                used_fallback = threshold < configured
+                return chunks, used_fallback
+
+        return [], False
+
     async def query(
         self,
         db: AsyncSession,
@@ -51,11 +81,10 @@ class RAGService:
 
         # Retrieve
         query_embedding = EmbeddingService.embed_query(query)
-        chunks = await VectorSearchService.search(
-            db, query_embedding,
-            top_k=self.settings.max_context_chunks,
-            document_ids=document_ids,
-            threshold=self.settings.confidence_threshold,
+        chunks, used_fallback = await self._retrieve_chunks_with_fallback(
+            db,
+            query_embedding,
+            document_ids,
         )
 
         if not chunks:
@@ -81,6 +110,8 @@ class RAGService:
 
         # Output guardrails
         output_flags = self.guardrails.check_output(answer)
+        retrieval_flags = ["retrieval_threshold_relaxed"] if used_fallback else []
+        merged_flags = [*retrieval_flags, *output_flags.get("flags", [])]
         if output_flags.get("flags"):
             answer = self.guardrails.sanitize_output(answer, output_flags["flags"])
 
@@ -109,13 +140,13 @@ class RAGService:
             response=answer, source_chunks=source_chunk_ids,
             model_used=self.settings.active_llm_model,
             confidence_score=confidence, judgment_mode=mode,
-            guardrail_flags=output_flags.get("flags", []),
+            guardrail_flags=merged_flags,
         )
 
         return ChatResponse(
             answer=answer,
             sources=sources,
             confidence=confidence,
-            guardrail_flags=output_flags.get("flags", []),
+            guardrail_flags=merged_flags,
             audit_log_id=audit_log_id,
         )

@@ -56,9 +56,18 @@ class ChecklistService:
 
         # Parse JSON
         try:
-            start = raw_response.find("{")
-            end = raw_response.rfind("}") + 1
-            result_data = json.loads(raw_response[start:end])
+            import re
+            cleaned = re.sub(r"```(?:json)?\s*", "", raw_response).strip()
+            start = cleaned.find("{")
+            end = cleaned.rfind("}") + 1
+            candidate = cleaned[start:end] if start >= 0 and end > start else ""
+            if not candidate:
+                raise ValueError("No JSON found")
+            try:
+                result_data = json.loads(candidate)
+            except json.JSONDecodeError:
+                candidate = re.sub(r",\s*([}\]])", r"\1", candidate)
+                result_data = json.loads(candidate)
         except (json.JSONDecodeError, ValueError):
             logger.error("Failed to parse checklist response")
             result_data = {"summary": raw_response, "items": []}

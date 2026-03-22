@@ -5,6 +5,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.services.embedding import EmbeddingService
 from app.services.vector_search import VectorSearchService
 from app.services.llm import LLMService
+from app.prompts.qa import build_qa_prompt
+from app.prompts.system import get_system_prompt
 from app.models.evaluation import Evaluation
 from app.config import get_settings
 
@@ -42,17 +44,58 @@ class EvaluationService:
         self.llm = LLMService()
         self.settings = get_settings()
 
+    async def _retrieve_chunks_with_fallback(
+        self,
+        db: AsyncSession,
+        query: str,
+        document_ids: Optional[List[uuid.UUID]],
+    ) -> List[dict]:
+        query_embedding = EmbeddingService.embed_query(query)
+        thresholds = [float(self.settings.confidence_threshold), 0.3, 0.1, -1.0]
+        seen = set()
+
+        for threshold in thresholds:
+            if threshold in seen:
+                continue
+            seen.add(threshold)
+
+            chunks = await VectorSearchService.search(
+                db,
+                query_embedding,
+                top_k=5,
+                document_ids=document_ids,
+                threshold=threshold,
+            )
+            if chunks:
+                return chunks
+
+        return []
+
+    async def _generate_answer_from_chunks(self, query: str, chunks: List[dict]) -> str:
+        if not chunks:
+            return "Tidak ditemukan dasar yang cukup dalam dokumen yang tersedia"
+
+        prompt = build_qa_prompt(chunks, query)
+        system_prompt = get_system_prompt(self.settings.judgment_mode)
+        return await self.llm.generate(prompt, system_prompt=system_prompt)
+
     async def evaluate_retrieval_relevance(
         self, db: AsyncSession, query: str, document_ids: Optional[List[uuid.UUID]] = None,
     ) -> dict:
         """Check if retrieved chunks are relevant to the query."""
-        query_embedding = EmbeddingService.embed_query(query)
-        chunks = await VectorSearchService.search(
-            db, query_embedding, top_k=5, document_ids=document_ids,
-        )
+        chunks = await self._retrieve_chunks_with_fallback(db, query, document_ids)
 
         if not chunks:
-            return {"score": 0.0, "details": {"reason": "No chunks retrieved"}}
+            eval_record = Evaluation(
+                eval_type="retrieval_relevance",
+                query=query,
+                retrieved_chunks=[],
+                score=0.0,
+                details={"reason": "No chunks retrieved"},
+            )
+            db.add(eval_record)
+            await db.commit()
+            return {"score": 0.0, "details": {"reason": "No chunks retrieved"}, "chunks": []}
 
         # Use LLM to evaluate relevance
         eval_prompt = f"""Rate the relevance of each retrieved passage to the query on a scale of 0-1.
@@ -86,7 +129,7 @@ Output JSON: {{"scores": [0.8, 0.6, ...], "avg_score": 0.7, "reasoning": "..."}}
         db.add(eval_record)
         await db.commit()
 
-        return {"score": score, "details": result}
+        return {"score": score, "details": result, "chunks": chunks}
 
     async def evaluate_faithfulness(
         self, db: AsyncSession, query: str, answer: str, context_chunks: List[dict],
@@ -165,16 +208,58 @@ Rate citation quality 0-1. Output JSON: {{"score": 0.8, "has_citations": true, "
         document_ids: Optional[List[uuid.UUID]] = None,
     ) -> dict:
         """Run the full evaluation suite."""
-        queries = test_queries or [q["query"] for q in DEFAULT_TEST_QUERIES]
+        if test_queries:
+            cases = [{"query": q, "eval_type": "retrieval_relevance"} for q in test_queries]
+        else:
+            cases = DEFAULT_TEST_QUERIES
+
         results = []
 
-        for query in queries:
-            result = await self.evaluate_retrieval_relevance(db, query, document_ids)
-            results.append({"query": query, "type": "retrieval_relevance", **result})
+        for case in cases:
+            query = case["query"]
+            eval_type = case.get("eval_type", "retrieval_relevance")
 
-        avg_score = sum(r["score"] for r in results) / len(results) if results else 0
+            if eval_type == "retrieval_relevance":
+                result = await self.evaluate_retrieval_relevance(db, query, document_ids)
+                results.append({"query": query, "type": eval_type, "score": result["score"], "details": result["details"]})
+                continue
+
+            # For faithfulness/groundedness, retrieve context then generate answer first.
+            retrieval = await self.evaluate_retrieval_relevance(db, query, document_ids)
+            chunks = retrieval.get("chunks", [])
+
+            if not chunks:
+                fallback_score = 0.0
+                details = {"reason": "No chunks retrieved"}
+                eval_record = Evaluation(
+                    eval_type=eval_type,
+                    query=query,
+                    actual_answer="",
+                    score=fallback_score,
+                    details=details,
+                )
+                db.add(eval_record)
+                await db.commit()
+                results.append({"query": query, "type": eval_type, "score": fallback_score, "details": details})
+                continue
+
+            answer = await self._generate_answer_from_chunks(query, chunks)
+
+            if eval_type == "faithfulness":
+                result = await self.evaluate_faithfulness(db, query, answer, chunks)
+            else:
+                result = await self.evaluate_groundedness(db, query, answer)
+
+            results.append({"query": query, "type": eval_type, "score": result["score"], "details": result["details"]})
+
+        retrieval_scores = [r["score"] for r in results if r["type"] == "retrieval_relevance"]
+        faithfulness_scores = [r["score"] for r in results if r["type"] == "faithfulness"]
+        groundedness_scores = [r["score"] for r in results if r["type"] == "groundedness"]
+
         return {
             "total_evaluations": len(results),
-            "avg_retrieval_relevance": avg_score,
+            "avg_retrieval_relevance": (sum(retrieval_scores) / len(retrieval_scores)) if retrieval_scores else None,
+            "avg_faithfulness": (sum(faithfulness_scores) / len(faithfulness_scores)) if faithfulness_scores else None,
+            "avg_groundedness": (sum(groundedness_scores) / len(groundedness_scores)) if groundedness_scores else None,
             "results": results,
         }

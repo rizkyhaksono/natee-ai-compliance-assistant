@@ -4,7 +4,7 @@ from uuid import UUID
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.chunk import Chunk
-from app.models.document import Document
+from app.models.document import Document, DocumentStatus
 
 logger = logging.getLogger(__name__)
 
@@ -32,14 +32,14 @@ class VectorSearchService:
                 c.chunk_index,
                 d.name as document_name,
                 d.document_type,
-                1 - (c.embedding <=> :embedding::vector) as relevance_score
+                1 - (c.embedding <=> CAST(:embedding AS vector)) as relevance_score
             FROM chunks c
             JOIN documents d ON c.document_id = d.id
-            WHERE d.status = 'ready'
-            AND 1 - (c.embedding <=> :embedding::vector) > :threshold
+            WHERE d.status::text = :status
+            AND 1 - (c.embedding <=> CAST(:embedding AS vector)) > :threshold
         """)
 
-        params = {"embedding": embedding_str, "threshold": threshold}
+        params = {"embedding": embedding_str, "status": DocumentStatus.READY.name, "threshold": threshold}
 
         if document_ids:
             doc_ids_str = ",".join(f"'{str(did)}'" for did in document_ids)
@@ -53,13 +53,13 @@ class VectorSearchService:
                     c.chunk_index,
                     d.name as document_name,
                     d.document_type,
-                    1 - (c.embedding <=> :embedding::vector) as relevance_score
+                    1 - (c.embedding <=> CAST(:embedding AS vector)) as relevance_score
                 FROM chunks c
                 JOIN documents d ON c.document_id = d.id
-                WHERE d.status = 'ready'
+                WHERE d.status::text = :status
                 AND c.document_id IN ({doc_ids_str})
-                AND 1 - (c.embedding <=> :embedding::vector) > :threshold
-                ORDER BY c.embedding <=> :embedding::vector
+                AND 1 - (c.embedding <=> CAST(:embedding AS vector)) > :threshold
+                ORDER BY c.embedding <=> CAST(:embedding AS vector)
                 LIMIT :top_k
             """)
         else:
@@ -73,18 +73,26 @@ class VectorSearchService:
                     c.chunk_index,
                     d.name as document_name,
                     d.document_type,
-                    1 - (c.embedding <=> :embedding::vector) as relevance_score
+                    1 - (c.embedding <=> CAST(:embedding AS vector)) as relevance_score
                 FROM chunks c
                 JOIN documents d ON c.document_id = d.id
-                WHERE d.status = 'ready'
-                AND 1 - (c.embedding <=> :embedding::vector) > :threshold
-                ORDER BY c.embedding <=> :embedding::vector
+                WHERE d.status::text = :status
+                AND 1 - (c.embedding <=> CAST(:embedding AS vector)) > :threshold
+                ORDER BY c.embedding <=> CAST(:embedding AS vector)
                 LIMIT :top_k
             """)
 
         params["top_k"] = top_k
         result = await db.execute(query, params)
         rows = result.fetchall()
+
+        logger.info(
+            "VectorSearch: doc_filter=%s threshold=%s top_k=%s → %d rows",
+            [str(d) for d in (document_ids or [])],
+            params.get("threshold"),
+            top_k,
+            len(rows),
+        )
 
         return [
             {

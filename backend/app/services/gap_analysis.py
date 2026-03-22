@@ -124,11 +124,32 @@ class GapAnalysisService:
         ]
 
     @staticmethod
-    def _extract_json(text: str) -> str:
-        """Extract JSON from LLM response that might contain extra text."""
-        # Try to find JSON block
-        start = text.find("{")
-        end = text.rfind("}") + 1
-        if start >= 0 and end > start:
-            return text[start:end]
-        raise ValueError("No JSON found in response")
+    def _extract_json(raw: str) -> str:
+        """Extract and clean JSON from LLM response."""
+        import re
+
+        # Strip markdown code fences
+        raw = re.sub(r"```(?:json)?\s*", "", raw).strip()
+
+        # Find outermost { ... }
+        start = raw.find("{")
+        end = raw.rfind("}") + 1
+        if start < 0 or end <= start:
+            raise ValueError("No JSON object found in response")
+
+        candidate = raw[start:end]
+
+        # Try parsing as-is first
+        try:
+            json.loads(candidate)
+            return candidate
+        except json.JSONDecodeError:
+            pass
+
+        # Fix common LLM mistakes: trailing commas before ] or }
+        candidate = re.sub(r",\s*([}\]])", r"\1", candidate)
+
+        # Fix unescaped newlines inside string values
+        candidate = re.sub(r'(?<=": ")(.*?)(?="[,\n}\]])', lambda m: m.group(0).replace("\n", "\\n"), candidate)
+
+        return candidate
